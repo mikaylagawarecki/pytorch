@@ -1,11 +1,14 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/shape.h"
+#include "ts_node_lowering.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
+using namespace torch_lazy_tensors::compiler;
 
 // Helper that makes it easy to access the TsNode::shape() method
 // from an ir::Output that holds a Node* that points to a TsNode
@@ -80,6 +83,13 @@ class TsNode : public Node {
   virtual const Output& operand(size_t i) const override {
     return operands_as_outputs_.at(i);
   }
+
+  // Lower is a backend-specific method since it returns a backend specific
+  // type. hence, it is convenient to define it differently per-backend rather
+  // than at Node API
+  virtual TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
+                           std::shared_ptr<torch::jit::GraphFunction> function,
+                           ts_backend::TSLoweringContext* loctx) const;
 
  private:
   // Adds node's index output number as operand.
