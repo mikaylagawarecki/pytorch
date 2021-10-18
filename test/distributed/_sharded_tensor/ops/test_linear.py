@@ -23,7 +23,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
 
-class TestShardedTensorOps(ShardedTensorTestBase):
+class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):
         # Use same seed.
         torch.manual_seed(0)
@@ -77,13 +77,29 @@ class TestShardedTensorOps(ShardedTensorTestBase):
         self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
         self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
 
-        # Test different ordering.
+        # Test different ordering. (Case 1)
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
                 "rank:1/cuda:1",
                 "rank:0/cuda:0",
                 "rank:3/cuda:3",
+                "rank:2/cuda:2",
+            ],
+        )
+
+        self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
+        self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
+        self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
+        self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
+
+        # Test different ordering. (Case 2)
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:3/cuda:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
                 "rank:2/cuda:2",
             ],
         )
@@ -114,7 +130,7 @@ class TestShardedTensorOps(ShardedTensorTestBase):
         self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
         self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
 
-        # Test different ordering.
+        # Test different ordering. (Case 1)
         spec = ChunkShardingSpec(
             dim=1,
             placements=[
@@ -122,6 +138,20 @@ class TestShardedTensorOps(ShardedTensorTestBase):
                 "rank:3/cuda:3",
                 "rank:0/cuda:0",
                 "rank:1/cuda:1",
+            ],
+        )
+        self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
+        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
+        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+
+        # Test different ordering. (Case 2)
+        spec = ChunkShardingSpec(
+            dim=1,
+            placements=[
+                "rank:3/cuda:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
             ],
         )
         self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
