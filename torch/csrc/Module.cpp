@@ -1489,6 +1489,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPGdsFile_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -1641,6 +1642,7 @@ PyObject* initModule() {
   // into C, so these lines have to execute first)..
   THCPStream_init(module);
   THCPEvent_init(module);
+  THCPGdsFile_init(module);
   THCPGraph_init(module);
 #endif
 
