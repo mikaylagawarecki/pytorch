@@ -1387,6 +1387,10 @@ void initJITBindings(PyObject* module) {
              const std::string& name,
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
+      .def("write_record_metadata",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             size_t size) { return self.writeRecordMetadata(name, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
       .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
