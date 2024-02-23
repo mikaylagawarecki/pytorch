@@ -577,7 +577,8 @@ def save(
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
-    _disable_byteorder_record: bool = False
+    _disable_byteorder_record: bool = False,
+    use_gds: bool = False,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -625,7 +626,8 @@ def save(
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
-            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
+            gds_file = torch._C._CudaGdsFileBase(f, 'w') if use_gds else None
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record, gds_file)
             return
     else:
         with _open_file_like(f, 'wb') as opened_file:
@@ -776,7 +778,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
         storage._write_file(f, _should_read_directly(f), True, torch._utils._element_size(dtype))
 
 
-def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
+def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record, gds_file=None):
+
     serialized_storages = {}
     id_map: Dict[int, str] = {}
 
@@ -852,14 +855,20 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
     for key in sorted(serialized_storages.keys()):
         name = f'data/{key}'
         storage = serialized_storages[key]
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != 'cpu':
-            storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
-        num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage, num_bytes)
+        # FIXME: Need proper checking that the location is a CUDA device
+        if gds_file:
+            num_bytes = storage.nbytes()
+            gds_offset = zip_file.write_record_metadata(name, num_bytes)
+            gds_file.save_storage(storage, gds_offset)
+        else:
+            # given that we copy things around anyway, we might use storage.cpu()
+            # this means to that to get tensors serialized, you need to implement
+            # .cpu() on the underlying Storage
+            if storage.device.type != 'cpu':
+                storage = storage.cpu()
+            # Now that it is on the CPU we can directly copy it into the zip file
+            num_bytes = storage.nbytes()
+            zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
@@ -869,6 +878,7 @@ def load(
     *,
     weights_only: bool = False,
     mmap: Optional[bool] = None,
+    use_gds: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1002,6 +1012,7 @@ def load(
             orig_position = opened_file.tell()
             overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
+                gds_file = torch._C._CudaGdsFileBase(f, mode='r') if use_gds else None
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
@@ -1019,6 +1030,7 @@ def load(
                                      map_location,
                                      _weights_only_unpickler,
                                      overall_storage=overall_storage,
+                                     gds_file=gds_file,
                                      **pickle_load_args)
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
@@ -1026,6 +1038,7 @@ def load(
                              map_location,
                              pickle_module,
                              overall_storage=overall_storage,
+                             gds_file=gds_file,
                              **pickle_load_args)
         if mmap:
             f_name = "" if not isinstance(f, str) else f"{f}, "
@@ -1335,7 +1348,7 @@ class StorageType:
         return f'StorageType(dtype={self.dtype})'
 
 
-def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall_storage=None, **pickle_load_args):
+def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall_storage=None, gds_file=None, **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
@@ -1377,6 +1390,14 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
+        elif gds_file:
+            storage_offset = zip_file.get_record_offset(name)
+            # FIXME: add a variant of restore_location that just returns the device
+            # rather than the storage moved to device
+            device = restore_location(torch.UntypedStorage(()), location).device
+            # create a storage that is already on the restore_location
+            storage = torch.UntypedStorage(numel, device=device)
+            gds_file.load_storage(storage, storage_offset)
         else:
             storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
         # swap here if byteswapping is needed
