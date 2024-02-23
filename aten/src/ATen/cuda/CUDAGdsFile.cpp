@@ -104,7 +104,7 @@ void GDSFile::close() {
   is_open = false;
 }
 
-void GDSFile::load_data(const at::Tensor& tensor) {
+void GDSFile::load_tensor(const at::Tensor& tensor, off_t offset) {
   TORCH_CHECK(mode == "r", filename, " was opened for read only");
   c10::cuda::CUDAGuard gpuGuard(tensor.device());
 
@@ -112,11 +112,23 @@ void GDSFile::load_data(const at::Tensor& tensor) {
   const size_t nbytes = tensor.nbytes();
 
   // Read the binary file
-  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, 0, 0);
+  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
 }
 
-void GDSFile::save_data(const at::Tensor& tensor) {
+void GDSFile::load_storage(const at::Storage& storage, off_t offset) {
+  TORCH_CHECK(mode == "r", filename, " was opened for read only");
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+
+  // Read the binary file
+  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
+  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+}
+
+void GDSFile::save_tensor(const at::Tensor& tensor, off_t offset) {
   TORCH_CHECK(mode == "w", filename, " was opened for write only");
   c10::cuda::CUDAGuard gpuGuard(tensor.device());
 
@@ -128,7 +140,27 @@ void GDSFile::save_data(const at::Tensor& tensor) {
   TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufRegister failed: ", cuGDSFileGetErrorString(status));
 
   // Write device memory contents to the file
-  ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, 0, 0);
+  ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
+  status = cuFileBufDeregister(dataPtr);
+
+  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufDeregister failed:", cuGDSFileGetErrorString(status));
+}
+
+void GDSFile::save_storage(const at::Storage& storage, off_t offset) {
+  TORCH_CHECK(mode == "w", filename, " was opened for write only");
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+
+  // FIXME: check whether storage.mutable_data() is the correct API to call here
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+
+  // Register device memory
+  status = cuFileBufRegister(dataPtr, nbytes, 0);
+  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufRegister failed: ", cuGDSFileGetErrorString(status));
+
+  // Write device memory contents to the file
+  ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
   status = cuFileBufDeregister(dataPtr);
 
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
@@ -138,7 +170,7 @@ void GDSFile::save_data(const at::Tensor& tensor) {
 
 // Just for benchmarking purposes
 
-void GDSFile::load_data_no_gds(const at::Tensor& tensor) {
+void GDSFile::load_tensor_no_gds(const at::Tensor& tensor) {
   TORCH_CHECK(mode == "rn", filename, " was opened for read only");
   c10::cuda::CUDAGuard gpuGuard(tensor.device());
 
@@ -154,13 +186,45 @@ void GDSFile::load_data_no_gds(const at::Tensor& tensor) {
   free(dataPtrCPU);
 }
 
-void GDSFile::save_data_no_gds(const at::Tensor& tensor) {
+void GDSFile::load_storage_no_gds(const at::Storage& storage) {
+  TORCH_CHECK(mode == "rn", filename, " was opened for read only");
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+
+  void* dataPtrCPU = nullptr;
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+  dataPtrCPU = malloc(nbytes);
+  TORCH_CHECK(dataPtrCPU != nullptr, "malloc failed");
+
+  const ssize_t nbytes_read = pread(fd, dataPtrCPU, nbytes, 0);
+  TORCH_CHECK(nbytes_read == nbytes || nbytes_read == 0, "fcntl pread failed");
+  C10_CUDA_CHECK(cudaMemcpy(dataPtr, dataPtrCPU, nbytes, cudaMemcpyHostToDevice));
+  free(dataPtrCPU);
+}
+
+void GDSFile::save_tensor_no_gds(const at::Tensor& tensor) {
   TORCH_CHECK(mode == "wn", filename, " was opened for write only");
   c10::cuda::CUDAGuard gpuGuard(tensor.device());
 
   void* dataPtrCPU = nullptr;
   void* dataPtr = tensor.data_ptr();
   const size_t nbytes = tensor.nbytes();
+  dataPtrCPU = malloc(nbytes);
+  TORCH_CHECK(dataPtrCPU != nullptr, "malloc failed");
+  C10_CUDA_CHECK(cudaMemcpy(dataPtrCPU, dataPtr, nbytes, cudaMemcpyDeviceToHost));
+
+  const ssize_t nbytes_written = pwrite(fd, dataPtrCPU, nbytes, 0);
+  TORCH_CHECK(nbytes_written == nbytes, "fcntl pwrite failed");
+  free(dataPtrCPU);
+}
+
+void GDSFile::save_storage_no_gds(const at::Storage& storage) {
+  TORCH_CHECK(mode == "wn", filename, " was opened for write only");
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+
+  void* dataPtrCPU = nullptr;
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
   dataPtrCPU = malloc(nbytes);
   TORCH_CHECK(dataPtrCPU != nullptr, "malloc failed");
   C10_CUDA_CHECK(cudaMemcpy(dataPtrCPU, dataPtr, nbytes, cudaMemcpyDeviceToHost));
