@@ -216,6 +216,10 @@ class TORCH_API PyTorchStreamWriter final {
       const void* data,
       size_t size,
       bool compress = false);
+  size_t writeRecordMetadata(
+      const std::string& name,
+      size_t size,
+      bool compress = false);
   void writeEndOfFile();
 
   const std::unordered_set<std::string>& getAllWrittenRecords();
@@ -246,6 +250,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  std::function<size_t(const void*, size_t)> writer_func_no_payload_;
   uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
 
@@ -255,6 +260,11 @@ class TORCH_API PyTorchStreamWriter final {
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(
+      void* pOpaque,
+      uint64_t file_ofs,
+      const void* pBuf,
+      size_t n);
+  friend size_t ostream_write_func_no_payload(
       void* pOpaque,
       uint64_t file_ofs,
       const void* pBuf,

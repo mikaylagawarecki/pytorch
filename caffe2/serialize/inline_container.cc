@@ -612,6 +612,23 @@ size_t ostream_write_func(
   return ret;
 }
 
+// Does not write anything but advances the position of the filestream by n.
+size_t ostream_write_func_no_payload(
+  void* pOpaque,
+  mz_uint64 file_ofs,
+  const void* pBuf,
+  size_t n) {
+  TORCH_CHECK(!pBuf);
+  auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
+  if (self->current_pos_ != file_ofs) {
+    CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
+  }
+  size_t ret = self->writer_func_no_payload_(pBuf, n);
+  self->current_pos_ += ret;
+  return n;
+}
+
+
 PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
     : archive_name_(basename(file_name)) {
   setup(file_name);
@@ -649,10 +666,16 @@ void PyTorchStreamWriter::setup(const string& file_name) {
       file_stream_.write(static_cast<const char*>(buf), nbytes);
       return !file_stream_ ? 0 : nbytes;
     };
+    writer_func_no_payload_ = [this](const void* buf, size_t nbytes) -> size_t {
+      // FIXME: error handling
+      file_stream_.seekp(current_pos_ + nbytes);
+      return nbytes;
+    };
   }
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
+  ar_->m_pWriteNoPayload = ostream_write_func_no_payload;
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
@@ -660,6 +683,18 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
 void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
   version_ = std::max(version, version_);
+}
+
+size_t PyTorchStreamWriter::writeRecordMetadata(
+    const std::string& name,
+    size_t size,
+    bool compress) {
+  size_t header_size = 30;
+  size_t name_size = name.size() + archive_name_plus_slash_.size();
+  size_t padding_size = detail::getPadding(ar_->m_archive_size, name_size, size, padding_);
+  size_t storage_offset = current_pos_ + header_size + name_size + padding_size;
+  PyTorchStreamWriter::writeRecord(name, nullptr, size, compress);
+  return storage_offset;
 }
 
 void PyTorchStreamWriter::writeRecord(
@@ -682,20 +717,20 @@ void PyTorchStreamWriter::writeRecord(
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
-      ar_.get(),
-      full_name.c_str(),
-      data,
-      size,
-      nullptr,
-      0,
-      flags,
-      0,
-      0,
-      nullptr,
-      padding_.c_str(),
-      padding_size,
-      nullptr,
-      0);
+      /*pZip=*/ar_.get(),
+      /*pArchive_name=*/full_name.c_str(),
+      /*pBuf=*/data,
+      /*buf_size=*/size,
+      /*pComment=*/nullptr,
+      /*comment_size=*/0,
+      /*level_and_flags=*/flags,
+      /*uncomp_size=*/0,
+      /*uncomp_crc32=*/0,
+      /*last_modified=*/nullptr,
+      /*user_extra_data=*/padding_.c_str(),
+      /*user_extra_data_len=*/padding_size,
+      /*user_extra_data_central=*/nullptr,
+      /*user_extra_data_central_len=*/0);
   valid("writing file ", name.c_str());
   files_written_.insert(name);
 }
