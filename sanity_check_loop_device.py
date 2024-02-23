@@ -30,20 +30,40 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestCudaGdsFileBase(TestCase):
-    def test_basic(self):
+    def test_basic_tensor(self):
         with tempfile.NamedTemporaryFile() as f:
+            size = (1000,)
             filename = f.name
 
-            t = torch.arange(1000, dtype=torch.float32, device="cuda:0")
-            t1 = torch.empty(1000, dtype=torch.float32, device="cuda:1")
+            t = torch.randn(size, dtype=torch.float32, device="cuda:0")
+            t1 = torch.empty(size, dtype=torch.float32, device="cuda:1")
 
             g = torch._C._CudaGdsFileBase(filename, "w")
 
-            g.save_data(t)
+            g.save_tensor(t)
             del g
 
             h = torch._C._CudaGdsFileBase(filename, "r")
-            h.load_data(t1)
+            h.load_tensor(t1)
+
+            self.assertEqual(t, t1)
+            del h
+
+    def test_basic_storage(self):
+        with tempfile.NamedTemporaryFile() as f:
+            size = (3,)
+            filename = f.name
+
+            t = torch.randn(size, dtype=torch.float32, device="cuda:0")
+            t1 = torch.empty(size, dtype=torch.float32, device="cuda:1")
+
+            g = torch._C._CudaGdsFileBase(filename, "w")
+
+            g.save_storage(t.untyped_storage())
+            del g
+
+            h = torch._C._CudaGdsFileBase(filename, "r")
+            h.load_storage(t1.untyped_storage())
 
             self.assertEqual(t, t1)
             del h

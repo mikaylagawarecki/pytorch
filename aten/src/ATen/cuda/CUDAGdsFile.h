@@ -6,6 +6,7 @@
 // FIXME: remove torch.h include
 // #include <torch/torch.h>
 #include <ATen/Tensor.h>
+#include <ATen/Storage.h>
 
 namespace at::cuda {
   class TORCH_CUDA_CPP_API GDSFile {
@@ -17,13 +18,18 @@ namespace at::cuda {
     void open(c10::string_view filename, c10::string_view mode);
     void close();
 
-    // FIXME: add file offset (or should these be handled by f.seek(offset) in python)?
     // FIXME: these APIs should take metadata (sizes, dtype, etc. rather than tensor)
-    // FIXME: Add API that loads to/from storage as well
-    void load_data(const at::Tensor& tensor);
-    void save_data(const at::Tensor& tensor);
-    void load_data_no_gds(const at::Tensor& tensor);
-    void save_data_no_gds(const at::Tensor& tensor);
+    void load_tensor(const at::Tensor& tensor, off_t offset);
+    void save_tensor(const at::Tensor& tensor, off_t offset);
+    void load_tensor_no_gds(const at::Tensor& tensor);
+    void save_tensor_no_gds(const at::Tensor& tensor);
+
+    void load_storage(const at::Storage& storage, off_t offset);
+    void save_storage(const at::Storage& storage, off_t offset);
+    void load_storage_no_gds(const at::Storage& storage);
+    void save_storage_no_gds(const at::Storage& storage);
+
+
 
     private:
     std::string filename;

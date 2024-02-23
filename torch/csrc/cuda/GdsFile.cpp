@@ -52,22 +52,60 @@ static void THCPGdsFile_dealloc(THCPGdsFile* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THCPGdsFile_load_data(PyObject* _self, PyObject* t_) {
+static PyObject* THCPGdsFile_load_tensor(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto self = (THCPGdsFile*)_self;
+  PyObject* t_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
+
   TORCH_CHECK(THPVariable_Check(t_));
+  TORCH_CHECK(THPUtils_checkLong(offset_));
   auto& t = THPVariable_Unpack(t_);
-  self->gds_file.load_data(t);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.load_tensor(t, offset);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPGdsFile_save_data(PyObject* _self, PyObject* t_) {
+static PyObject* THCPGdsFile_save_tensor(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto self = (THCPGdsFile*)_self;
+  PyObject* t_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
+
   TORCH_CHECK(THPVariable_Check(t_));
+  TORCH_CHECK(THPUtils_checkLong(offset_));
   auto& t = THPVariable_Unpack(t_);
-  self->gds_file.save_data(t);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.save_tensor(t, offset);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPGdsFile_load_storage(PyObject* _self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto self = (THCPGdsFile*)_self;
+  PyObject* s_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
+
+  TORCH_CHECK(THPStorage_Check(s_));
+  auto& s = THPStorage_Unpack(s_);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.load_storage(s, offset);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPGdsFile_save_storage(PyObject* _self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto self = (THCPGdsFile*)_self;
+  PyObject* s_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
+
+  TORCH_CHECK(THPStorage_Check(s_));
+  auto& s = THPStorage_Unpack(s_);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.save_storage(s, offset);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -83,8 +121,10 @@ static struct PyGetSetDef THCPGdsFile_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef THCPGdsFile_methods[] = {
-    {(char*)"load_data", THCPGdsFile_load_data, METH_O, nullptr},
-    {(char*)"save_data", THCPGdsFile_save_data, METH_O, nullptr},
+    {(char*)"load_tensor", THCPGdsFile_load_tensor, METH_VARARGS, nullptr},
+    {(char*)"save_tensor", THCPGdsFile_save_tensor, METH_VARARGS, nullptr},
+    {(char*)"load_storage", THCPGdsFile_load_storage, METH_VARARGS, nullptr},
+    {(char*)"save_storage", THCPGdsFile_save_storage, METH_VARARGS, nullptr},
     {nullptr}};
 
 PyTypeObject THCPGdsFileType = {
