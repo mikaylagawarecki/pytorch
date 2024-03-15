@@ -240,11 +240,11 @@ constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 constexpr int MZ_ZIP_DATA_DESCRIPTOR_ID = 0x08074b50;
 
 namespace detail {
-size_t getPadding(
+
+std::tuple<size_t, size_t> getPaddingHelper(
     size_t cursor,
     size_t filename_size,
-    size_t size,
-    std::string& padding_buf) {
+    size_t size) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -259,6 +259,16 @@ size_t getPadding(
   size_t mod = start % kFieldAlignment;
   size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
   size_t padding_size = next_offset - start;
+  return std::tuple<size_t, size_t>(next_offset, padding_size);
+
+}
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf) {
+  std::tuple<size_t, size_t> res = getPaddingHelper(cursor, filename_size, size);
+  size_t padding_size = std::get<1>(res);
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {
     padding_buf.append(padding_size_plus_fbxx - padding_buf.size(), 'Z');
@@ -689,10 +699,9 @@ size_t PyTorchStreamWriter::writeRecordMetadata(
     const std::string& name,
     size_t size,
     bool compress) {
-  size_t header_size = 30;
   size_t name_size = name.size() + archive_name_plus_slash_.size();
-  size_t padding_size = detail::getPadding(ar_->m_archive_size, name_size, size, padding_);
-  size_t storage_offset = current_pos_ + header_size + name_size + padding_size;
+  std::tuple<size_t, size_t> res = detail::getPaddingHelper(ar_->m_archive_size, name_size, size);
+  size_t storage_offset = std::get<0>(res);
   PyTorchStreamWriter::writeRecord(name, nullptr, size, compress);
   return storage_offset;
 }
