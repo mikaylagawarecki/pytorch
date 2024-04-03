@@ -293,8 +293,7 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
 else()
     set_property(
         TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-        # FIXME: should be CUDA::cuFile but doesn't seem to be working
-        /usr/local/cuda/lib64/libcufile.so)
+        CUDA::cuFile)
 endif()
 
 # curand
