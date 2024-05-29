@@ -497,6 +497,26 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
         return _ToTorchTensor.apply(redist_res, grad_placements)
 
+    def module_load(self, other: torch.Tensor, assign: bool = False) -> torch.Tensor:
+        if type(other) is torch.Tensor:
+            out = distribute_tensor(other, self.device_mesh, self.placements)
+        elif type(other) is DTensor:
+            out = other.redistribute(self.device_mesh, self.placements)
+        else:
+            raise NotImplementedError(f"Expected other to be a DTensor or a Tensor but got type {type(other)}")
+
+        local_tensor = self._local_tensor.module_load(out._local_tensor, assign=assign)
+        return DTensor(
+            local_tensor,
+            self.device_mesh,
+            self.placements,
+            # Need to rationalize these
+            shape=self.shape,  # global shape
+            dtype=local_tensor.dtype,
+            requires_grad=local_tensor.requires_grad,
+            stride=self.stride(),  # global stride
+        )
+
     @property
     def device_mesh(self) -> DeviceMesh:
         """
