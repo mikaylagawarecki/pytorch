@@ -1,4 +1,5 @@
 import difflib
+import time
 import functools
 import os
 import io
@@ -8,6 +9,10 @@ import sys
 import torch
 import tarfile
 import tempfile
+import threading
+import queue
+import psutil
+import os
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
@@ -852,18 +857,69 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
 
         zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
 
-    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()):
-        name = f'data/{key}'
-        storage = serialized_storages[key]
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != 'cpu':
+    tensors_queue = queue.Queue()
+    stop_event = threading.Event()
+    budget = [2048000000]
+    lock = threading.Lock()
+    import time
+
+    def move_to_cpu(serialized_storages, lock, budget):
+        total_memory_moved_to_cpu = 0
+        for key in sorted(serialized_storages.keys()):
+            storage = serialized_storages[key]
+            while budget[0] < storage.nbytes():
+                # print(storage.nbytes(), budget[0])
+                time.sleep(0.1)
+            lock.acquire()
+            budget[0] -= storage.nbytes()
+            # print(f"budget={budget}")
+            lock.release()
             storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
-        num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage, num_bytes)
+            total_memory_moved_to_cpu += storage.nbytes()
+            # print("mem moved ", total_memory_moved_to_cpu / (1024 * 1024))
+            tensors_queue.put((key, storage))
+
+    def write_to_disk(tensors_queue, num_storages, stop_event, lock, budget):
+        count = 0
+        total_memory_written_to_disk = 0
+        while count < num_storages:
+            (key, storage) = tensors_queue.get()
+            count += 1
+            zip_file.write_record(f"data/{key}", storage, storage.nbytes())
+            lock.acquire()
+            budget[0] += storage.nbytes()
+            # print(f"budget={budget}")
+            lock.release()
+        stop_event.set()
+
+    def memory_use(stop_event):
+        while not stop_event.is_set():
+            pid = os.getpid()
+            meminfo = psutil.Process(pid).memory_info()
+            print(meminfo.rss/ (1024 * 1024))
+            time.sleep(0.2)
+
+    pid = os.getpid()
+    meminfo = psutil.Process(pid).memory_info()
+    print(meminfo.rss / (1024 * 1024))
+    move_to_cpu_thread = threading.Thread(target=move_to_cpu, args=(serialized_storages, lock, budget))
+    write_to_disk_thread = threading.Thread(target=write_to_disk,
+                                            args=(tensors_queue,
+                                                  len(serialized_storages.keys()),
+                                                  stop_event,
+                                                  lock,
+                                                  budget))
+    memory_use_thread = threading.Thread(target=memory_use, args=(stop_event,))
+    move_to_cpu_thread.start()
+    write_to_disk_thread.start()
+    memory_use_thread.start()
+
+    move_to_cpu_thread.join()
+    write_to_disk_thread.join()
+    memory_use_thread.join()
+
+    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
+
 
 
 def load(
