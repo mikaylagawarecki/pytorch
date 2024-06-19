@@ -273,7 +273,7 @@ class TORCH_API PyTorchStreamWriter final {
 
 namespace detail {
 // Writer-specific constants
-constexpr uint64_t kFieldAlignment = 64;
+constexpr uint64_t kFieldAlignment = 4096;
 
 // Returns a record to be appended to the local user extra data entry in order
 // to make data beginning aligned at kFieldAlignment bytes boundary.
