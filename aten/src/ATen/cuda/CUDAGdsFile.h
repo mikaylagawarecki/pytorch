@@ -29,6 +29,8 @@ namespace at::cuda {
     void load_storage_no_gds(const at::Storage& storage);
     void save_storage_no_gds(const at::Storage& storage);
 
+    void register_buffer(const at::Tensor& tensor);
+    void deregister_buffer(const at::Tensor& tensor);
 
 
     private:

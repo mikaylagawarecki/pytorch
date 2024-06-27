@@ -104,6 +104,22 @@ void GDSFile::close() {
   is_open = false;
 }
 
+void GDSFile::register_buffer(const at::Tensor& tensor) {
+  void* dataPtr = tensor.data_ptr();
+  const size_t nbytes = tensor.nbytes();
+
+  status = cuFileBufRegister(dataPtr, nbytes, 0);
+  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufRegister failed: ", cuGDSFileGetErrorString(status));
+  return;
+}
+
+void GDSFile::deregister_buffer(const at::Tensor& tensor) {
+  void* dataPtr = tensor.data_ptr();
+  status = cuFileBufDeregister(dataPtr);
+  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufDeregister failed: ", cuGDSFileGetErrorString(status));
+  return;
+}
+
 void GDSFile::load_tensor(const at::Tensor& tensor, off_t offset) {
   TORCH_CHECK(mode == "r", filename, " was opened for read only");
   c10::cuda::CUDAGuard gpuGuard(tensor.device());
@@ -113,7 +129,7 @@ void GDSFile::load_tensor(const at::Tensor& tensor, off_t offset) {
 
   // Read the binary file
   ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
-  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 
 void GDSFile::load_storage(const at::Storage& storage, off_t offset) {
@@ -125,7 +141,7 @@ void GDSFile::load_storage(const at::Storage& storage, off_t offset) {
 
   // Read the binary file
   ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
-  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 
 void GDSFile::save_tensor(const at::Tensor& tensor, off_t offset) {
@@ -135,16 +151,9 @@ void GDSFile::save_tensor(const at::Tensor& tensor, off_t offset) {
   void* dataPtr = tensor.data_ptr();
   const size_t nbytes = tensor.nbytes();
 
-  // Register device memory
-  status = cuFileBufRegister(dataPtr, nbytes, 0);
-  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufRegister failed: ", cuGDSFileGetErrorString(status));
-
   // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
-  status = cuFileBufDeregister(dataPtr);
-
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
-  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufDeregister failed:", cuGDSFileGetErrorString(status));
 }
 
 void GDSFile::save_storage(const at::Storage& storage, off_t offset) {
@@ -155,16 +164,9 @@ void GDSFile::save_storage(const at::Storage& storage, off_t offset) {
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
-  // Register device memory
-  status = cuFileBufRegister(dataPtr, nbytes, 0);
-  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufRegister failed: ", cuGDSFileGetErrorString(status));
-
   // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
-  status = cuFileBufDeregister(dataPtr);
-
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
-  TORCH_CHECK(status.err == CU_FILE_SUCCESS, "cuFileBufDeregister failed:", cuGDSFileGetErrorString(status));
 }
 
 
