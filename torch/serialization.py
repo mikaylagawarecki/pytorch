@@ -1387,6 +1387,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device='meta')
+            storage.offset =  zip_file.get_record_offset(name)
         elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
