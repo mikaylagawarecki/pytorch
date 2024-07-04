@@ -57,9 +57,14 @@ static PyObject* THCPGdsFile_register_buffer(PyObject* _self, PyObject* args) {
   auto self = (THCPGdsFile*)_self;
   PyObject* t_ = PyTuple_GetItem(args, 0);
 
-  TORCH_CHECK(THPVariable_Check(t_));
-  auto& t = THPVariable_Unpack(t_);
-  self->gds_file.register_buffer(t);
+  TORCH_CHECK(THPVariable_Check(t_) || THPStorage_Check(t_));
+  if (THPVariable_Check(t_)) {
+    auto& t = THPVariable_Unpack(t_);
+    self->gds_file.register_buffer(t);
+  } else {
+    auto& t = THPStorage_Unpack(t_);
+    self->gds_file.register_buffer(t);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -74,6 +79,32 @@ static PyObject* THCPGdsFile_deregister_buffer(
   TORCH_CHECK(THPVariable_Check(t_));
   auto& t = THPVariable_Unpack(t_);
   self->gds_file.deregister_buffer(t);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPGdsFile_load_tensors(PyObject* _self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto self = (THCPGdsFile*)_self;
+  PyObject* ts_ = PyTuple_GetItem(args, 0);
+  PyObject* offsets_ = PyTuple_GetItem(args, 1);
+
+  TORCH_CHECK(PyList_Check(ts_));
+  TORCH_CHECK(PyList_Check(offsets_));
+  int ntensors = PySequence_Length(ts_);
+
+  std::vector<at::Tensor> ts;
+  std::vector<off_t> offsets;
+
+  for (const auto i : c10::irange(ntensors)) {
+    auto t = THPObjectPtr(PySequence_GetItem(ts_, i));
+    auto offset = THPObjectPtr(PySequence_GetItem(offsets_, i));
+    TORCH_CHECK(THPVariable_Check(t.get()));
+    TORCH_CHECK(THPUtils_checkLong(offset.get()));
+    ts.push_back(THPVariable_Unpack(t.get()));
+    offsets.push_back(THPUtils_unpackLong(offset.get()));
+  }
+  self->gds_file.load_tensors(ts, offsets);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -99,10 +130,65 @@ static PyObject* THCPGdsFile_load_tensor_no_gds(
   HANDLE_TH_ERRORS
   auto self = (THCPGdsFile*)_self;
   PyObject* t_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
 
   TORCH_CHECK(THPVariable_Check(t_));
+  TORCH_CHECK(THPUtils_checkLong(offset_));
   auto& t = THPVariable_Unpack(t_);
-  self->gds_file.load_tensor_no_gds(t);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.load_tensor_no_gds(t, offset);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPGdsFile_save_tensors(PyObject* _self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto self = (THCPGdsFile*)_self;
+  PyObject* ts_ = PyTuple_GetItem(args, 0);
+  PyObject* offsets_ = PyTuple_GetItem(args, 1);
+
+  TORCH_CHECK(PyList_Check(ts_));
+  TORCH_CHECK(PyList_Check(offsets_));
+  int ntensors = PySequence_Length(ts_);
+
+  std::vector<at::Tensor> ts;
+  std::vector<off_t> offsets;
+
+  for (const auto i : c10::irange(ntensors)) {
+    auto t = THPObjectPtr(PySequence_GetItem(ts_, i));
+    auto offset = THPObjectPtr(PySequence_GetItem(offsets_, i));
+    TORCH_CHECK(THPVariable_Check(t.get()));
+    TORCH_CHECK(THPUtils_checkLong(offset.get()));
+    ts.push_back(THPVariable_Unpack(t.get()));
+    offsets.push_back(THPUtils_unpackLong(offset.get()));
+  }
+  self->gds_file.save_tensors(ts, offsets);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPGdsFile_save_storages(PyObject* _self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto self = (THCPGdsFile*)_self;
+  PyObject* ts_ = PyTuple_GetItem(args, 0);
+  PyObject* offsets_ = PyTuple_GetItem(args, 1);
+
+  TORCH_CHECK(PyList_Check(ts_));
+  TORCH_CHECK(PyList_Check(offsets_));
+  int ntensors = PySequence_Length(ts_);
+
+  std::vector<at::Storage> ts;
+  std::vector<off_t> offsets;
+
+  for (const auto i : c10::irange(ntensors)) {
+    auto t = THPObjectPtr(PySequence_GetItem(ts_, i));
+    auto offset = THPObjectPtr(PySequence_GetItem(offsets_, i));
+    TORCH_CHECK(THPStorage_Check(t.get()));
+    TORCH_CHECK(THPUtils_checkLong(offset.get()));
+    ts.push_back(THPStorage_Unpack(t.get()));
+    offsets.push_back(THPUtils_unpackLong(offset.get()));
+  }
+  self->gds_file.save_storages(ts, offsets);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -128,10 +214,13 @@ static PyObject* THCPGdsFile_save_tensor_no_gds(
   HANDLE_TH_ERRORS
   auto self = (THCPGdsFile*)_self;
   PyObject* t_ = PyTuple_GetItem(args, 0);
+  PyObject* offset_ = PyTuple_GetItem(args, 1);
 
   TORCH_CHECK(THPVariable_Check(t_));
+  TORCH_CHECK(THPUtils_checkLong(offset_));
   auto& t = THPVariable_Unpack(t_);
-  self->gds_file.save_tensor_no_gds(t);
+  int64_t offset = THPUtils_unpackLong(offset_);
+  self->gds_file.save_tensor_no_gds(t, offset);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -176,17 +265,20 @@ static struct PyGetSetDef THCPGdsFile_properties[] = {
 // cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef THCPGdsFile_methods[] = {
     {(char*)"load_tensor", THCPGdsFile_load_tensor, METH_VARARGS, nullptr},
+    {(char*)"load_tensors", THCPGdsFile_load_tensors, METH_VARARGS, nullptr},
     {(char*)"load_tensor_no_gds",
      THCPGdsFile_load_tensor_no_gds,
      METH_VARARGS,
      nullptr},
     {(char*)"save_tensor", THCPGdsFile_save_tensor, METH_VARARGS, nullptr},
+    {(char*)"save_tensors", THCPGdsFile_save_tensors, METH_VARARGS, nullptr},
     {(char*)"save_tensor_no_gds",
      THCPGdsFile_save_tensor_no_gds,
      METH_VARARGS,
      nullptr},
     {(char*)"load_storage", THCPGdsFile_load_storage, METH_VARARGS, nullptr},
     {(char*)"save_storage", THCPGdsFile_save_storage, METH_VARARGS, nullptr},
+    {(char*)"save_storages", THCPGdsFile_save_storages, METH_VARARGS, nullptr},
     {(char*)"register_buffer",
      THCPGdsFile_register_buffer,
      METH_VARARGS,
