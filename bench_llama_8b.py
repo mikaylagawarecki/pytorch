@@ -1,6 +1,20 @@
 '''
 To load llama-8B on rank 0:
-    python bench_llama_8b.py
+    python bench_llama_8b.py {flags}
+
+Run this script to benchmark llama-8B save/load time. This script expects the llama-8B checkpoints to exist
+at `/mnt/nvme0/consolidated.00.pth`.
+
+
+Flags:
+-l: Benchmark loading (one of -l or -s must be passed)
+-s: Benchmark saving (one of -l or -s must be passed)
+-b: Benchmark baseline (i.e. torch.load or torch.save), without this flag GDS is benchmarked
+-r: For use when benchmarking gds: whether to register cuda tensors via cuFileBufRegister, (either before saving or by
+    creating and registering the buffer when loading).
+-m: Only for use with -b -l, pass mmap=True to torch.load call
+-w: Only for use with -b -l, load a checkpoint of same sizes before timing to warmup CachingAllocator
+    Expects a checkpoint with similar shapes to be located at `/mnt/nvme{*}/70B-consolidated.0{rank}-1.pth`
 '''
 
 import torch
@@ -21,6 +35,12 @@ os.environ["CUFILE_ENV_PATH_JSON"] = "/home/mg1998/pytorch/cufile.json"
 
 ckpt_path = f"/mnt/nvme0/consolidated.00.pth"
 
+def setup():
+    '''
+    Initialize cuda context so that it does not get measured in benchmarks.
+    '''
+    torch.cuda.init()
+
 def init_gpu_direct_storage():
     '''
     Calls cuFileDriverOpen in the process, prevents this cold start time from
@@ -28,10 +48,17 @@ def init_gpu_direct_storage():
     '''
     start_time = time.time()
     gds_file = torch._C._CudaGdsFileBase(f"/mnt/nvme0/bla_0.pt", "w")
-    print(f"cuFileDriverOpen cold start was {time.time() - start_time}s")
+    # print(f"cuFileDriverOpen cold start was {time.time() - start_time}s")
     del gds_file
 
-def baseline_load(ckpt_path, mmap):
+def baseline_load(ckpt_path, mmap, warmup):
+    # First load a checkpoint with tensors of same shapes than del it so CudaCachingAllocator
+    # will have all CUDA memory needed for loading the checkpoint already `cudaMalloc-ed`
+    if warmup:
+        new_ckpt_path = f"/mnt/nvme0/consolidated.00-1.pth"
+        sd1 = torch.load(new_ckpt_path, mmap=mmap, map_location=f'cuda:0')
+        del sd1
+    torch.cuda.synchronize()
     start_time = time.time()
     sd = torch.load(ckpt_path, mmap=mmap, map_location=f'cuda:0')
     # torch.cuda.synchronize()
@@ -126,11 +153,14 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--baseline', action="store_true", help='run baseline')
     parser.add_argument('-r', '--register_buffers', action="store_true", help='run cuFileBufRegister on each buffer')
     parser.add_argument('-m', '--mmap', action="store_true", help='run baseline torch.load with mmap=True')
+    parser.add_argument('-w', '--warmup', action="store_true", help='load a checkpoint of same sizes before timing to warmup CachingAllocator')
     args = parser.parse_args()
     assert not (args.save and args.load), "Expected one of -s or -l but got both"
     assert not (args.register_buffers and args.baseline), "Got both -r and -b but cannot cuFileBufRegister for baseline"
     assert not ((not (args.baseline and args.load)) and args.mmap), "Got -m but mmap is only for load baseline"
+    assert not (not (args.baseline and args.load) and args.warmup), "Got -w but warmup is only for load baseline"
 
+    setup()
     if not args.baseline:
         init_gpu_direct_storage()
 
@@ -139,7 +169,7 @@ if __name__ == "__main__":
             baseline_save(ckpt_path)
         else:
             assert args.load
-            baseline_load(ckpt_path, args.mmap)
+            baseline_load(ckpt_path, args.mmap, args.warmup)
     else:
         if args.save:
             if args.register_buffers:
