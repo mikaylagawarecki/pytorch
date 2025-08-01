@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -240,6 +241,28 @@ if not IS_WINDOWS:
             out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
+
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_device_guard(self, device):
+            import libtorch_agnostic
+
+            device_index = 1
+            out = libtorch_agnostic.ops.test_device_guard(device_index)
+            self.assertEqual(out, device_index)
+
+        @onlyCUDA
+        def test_stream(self, device):
+            import libtorch_agnostic
+
+            stream = torch.cuda.Stream()
+            device = torch.cuda.current_device()
+
+            with stream:
+                expected_stream_id = torch.cuda.current_stream(0).stream_id
+                stream_id = libtorch_agnostic.ops.test_stream(device)
+
+            self.assertEqual(stream_id, expected_stream_id)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

@@ -194,3 +194,27 @@ def my_narrow(t, dim, start, length) -> Tensor:
     Returns: Narrowed tensor
     """
     return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
+
+
+def test_device_guard(device_index) -> Tensor:
+    """
+    Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.
+
+    Args:
+        device_index: Device index to set the guard to
+
+    Returns: A 3x3 empty tensor created on the device specified by device_index
+    """
+    return torch.ops.libtorch_agnostic.test_device_guard.default(device_index)
+
+
+def test_stream(device_index) -> int:
+    """
+    Tests the Stream functionality by getting the current stream ID for the specified device.
+
+    Args:
+        device_index: Device index to get the stream for
+
+    Returns: Stream ID as an integer
+    """
+    return torch.ops.libtorch_agnostic.test_stream.default(device_index)
