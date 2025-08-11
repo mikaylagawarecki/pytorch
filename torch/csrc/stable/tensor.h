@@ -4,6 +4,8 @@
 #include <torch/headeronly/util/shim_utils.h>
 #include <memory>
 
+#include <torch/headeronly/core/ScalarType.h>
+
 namespace torch::stable {
 
 using DeviceIndex =
@@ -127,6 +129,13 @@ class Tensor {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  // Temporarily add scalar_type() for fa3, pending Jane's PR
+  c10::ScalarType scalar_type() const {
+    int32_t dtype;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    return static_cast<c10::ScalarType>(dtype);
   }
 
   // =============================================================================
