@@ -12,6 +12,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/headeronly/dummy.h>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
@@ -1024,6 +1025,22 @@ struct TORCH_API IValue final {
   }
   at::Generator toGenerator() &&;
   at::Generator toGenerator() const&;
+
+  // Dummy - use v2_9 as the current version
+  IValue(const dummy_types::v2_9::Dummy& d) : tag(Tag::Dummy) {
+    payload.u.as_dummy.foo = d.get_foo();
+    payload.u.as_dummy.id = d.get_id();
+  }
+
+  bool isDummy() const {
+    return Tag::Dummy == tag;
+  }
+
+  dummy_types::v2_9::Dummy toDummy() const {
+    AT_ASSERT(isDummy());
+    return dummy_types::v2_9::Dummy(
+        payload.u.as_dummy.foo, payload.u.as_dummy.id);
+  }
 
   // for debugging
   std::string tagKind() const {
