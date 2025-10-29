@@ -1,5 +1,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/device.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
@@ -485,6 +486,71 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_amax", &boxed_my_amax);
   m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
+
+// Test functions for torch::stable::Device
+
+void boxed_test_device_cpu(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  using torch::stable::Device;
+  using torch::stable::DeviceType;
+
+  Device d(DeviceType::CPU);
+  bool res = d.get() != nullptr && d.is_cpu() && d.index() == -1;
+  stack[0] = torch::stable::detail::from(res);
+}
+
+void boxed_test_device_cuda(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  using torch::stable::Device;
+
+  Device d("cuda:0");
+  bool res = d.get() != nullptr && d.is_cuda() && d.index() == 0;
+  stack[0] = torch::stable::detail::from(res);
+}
+
+void boxed_test_device_equality(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  using torch::stable::Device;
+  using torch::stable::DeviceType;
+
+  Device d1(DeviceType::CPU);
+  Device d2("cpu");
+  bool res = (d1 == d2);
+  stack[0] = torch::stable::detail::from(res);
+}
+
+void boxed_test_device_set_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  using torch::stable::Device;
+
+  Device d("cuda:0");
+  d.set_index(1);
+  int64_t res = d.index();
+  stack[0] = torch::stable::detail::from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_device_cpu() -> bool");
+  m.def("test_device_cuda() -> bool");
+  m.def("test_device_equality() -> bool");
+  m.def("test_device_set_index() -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_device_cpu", &boxed_test_device_cpu);
+  m.impl("test_device_cuda", &boxed_test_device_cuda);
+  m.impl("test_device_equality", &boxed_test_device_equality);
+  m.impl("test_device_set_index", &boxed_test_device_set_index);
+}
+
 
 // Test functions for torch::stable::accelerator APIs
 

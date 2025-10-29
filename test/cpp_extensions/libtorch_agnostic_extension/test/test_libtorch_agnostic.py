@@ -367,6 +367,26 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        @onlyCUDA
+        def test_device(self, device):
+            import libtorch_agnostic
+
+            # Test creating Device from DeviceType and checking CPU properties
+            cpu_device_result = libtorch_agnostic.ops.test_device_cpu()
+            self.assertTrue(cpu_device_result)
+
+            # Test Device equality
+            devices_equal = libtorch_agnostic.ops.test_device_equality()
+            self.assertTrue(devices_equal)
+
+            # Test CUDA device with index
+            cuda_device_result = libtorch_agnostic.ops.test_device_cuda()
+            self.assertTrue(cuda_device_result)
+
+            # Test set_index
+            new_index = libtorch_agnostic.ops.test_device_set_index()
+            self.assertEqual(new_index, 1)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
