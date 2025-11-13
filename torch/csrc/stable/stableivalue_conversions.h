@@ -6,6 +6,8 @@
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/DeviceType.h>
+#include <torch/headeronly/core/Layout.h>
+#include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
@@ -387,6 +389,66 @@ struct ToImpl<ScalarType> {
           false,
           "Not yet supported ScalarType ",
           std::to_string(shim_scalartype),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for StableIValue => torch::headeronly::MemoryFormat
+template <>
+struct ToImpl<MemoryFormat> {
+  static MemoryFormat call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_memoryformat = to<int32_t>(val);
+    if (shim_memoryformat == aoti_torch_memory_format_contiguous_format()) {
+      return MemoryFormat::Contiguous;
+    } else if (shim_memoryformat == aoti_torch_memory_format_preserve_format()) {
+      return MemoryFormat::Preserve;
+    } else if (shim_memoryformat == aoti_torch_memory_format_channels_last()) {
+      return MemoryFormat::ChannelsLast;
+    } else if (shim_memoryformat == aoti_torch_memory_format_channels_last_3d()) {
+      return MemoryFormat::ChannelsLast3d;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported MemoryFormat ",
+          std::to_string(shim_memoryformat),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for StableIValue => torch::headeronly::Layout
+template <>
+struct ToImpl<Layout> {
+  static Layout call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_layout = to<int32_t>(val);
+    if (shim_layout == aoti_torch_layout_strided()) {
+      return Layout::Strided;
+    } else if (shim_layout == aoti_torch_layout_sparse_coo()) {
+      return Layout::Sparse;
+    } else if (shim_layout == aoti_torch_layout_sparse_csr()) {
+      return Layout::SparseCsr;
+    } else if (shim_layout == aoti_torch_layout__mkldnn()) {
+      return Layout::Mkldnn;
+    } else if (shim_layout == aoti_torch_layout_sparse_csc()) {
+      return Layout::SparseCsc;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsr()) {
+      return Layout::SparseBsr;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsc()) {
+      return Layout::SparseBsc;
+    } else if (shim_layout == aoti_torch_layout_jagged()) {
+      return Layout::Jagged;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported Layout ",
+          std::to_string(shim_layout),
           ", please file an issue describing your use case.");
     }
   }

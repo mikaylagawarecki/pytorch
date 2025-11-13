@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/headeronly/core/MemoryFormat.h>
+
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -7,32 +9,7 @@
 #include <ostream>
 #include <vector>
 
-// Memory format is not the property of a Tensor. It is the way to tell an
-// operator how the result should be organized in memory and nothing more. That
-// means memory format should never be used as return value for any tensor state
-// interrogation functions (internally and externally).
-//
-// Possible options are:
-//  Preserve:
-//    If any of the input tensors is in channels_last format, operator output
-//    should be in channels_last format
-//
-//  Contiguous:
-//    Regardless of input tensors format, the output should be contiguous
-//    Tensor.
-//
-//  ChannelsLast:
-//    Regardless of input tensors format, the output should be in channels_last
-//    format.
-
 namespace c10 {
-enum class MemoryFormat : int8_t {
-  Contiguous,
-  Preserve,
-  ChannelsLast,
-  ChannelsLast3d,
-  NumOptions
-};
 
 // If you are seeing this, it means that this call site was not checked if
 // the memory format could be preserved, and it was switched to old default
@@ -41,24 +18,6 @@ enum class MemoryFormat : int8_t {
 
 inline MemoryFormat get_contiguous_memory_format() {
   return MemoryFormat::Contiguous;
-}
-
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    at::MemoryFormat memory_format) {
-  switch (memory_format) {
-    case MemoryFormat::Preserve:
-      return stream << "Preserve";
-    case MemoryFormat::Contiguous:
-      return stream << "Contiguous";
-    case MemoryFormat::ChannelsLast:
-      return stream << "ChannelsLast";
-    case MemoryFormat::ChannelsLast3d:
-      return stream << "ChannelsLast3d";
-    case MemoryFormat::NumOptions:
-    default:
-      TORCH_CHECK(false, "Unknown memory format ", memory_format);
-  }
 }
 
 // Note: Hardcoded the channel last stride indices here to get better
@@ -79,8 +38,7 @@ inline std::vector<T> get_channels_last_strides_2d(ArrayRef<T> sizes) {
       strides[1] = strides[2] * sizes[2];
       return strides;
     default:
-      TORCH_INTERNAL_ASSERT(
-          false, "ChannelsLast2d doesn't support size ", sizes.size());
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast2d doesn't support size ", sizes.size());
   }
 }
 
@@ -106,8 +64,7 @@ std::vector<T> get_channels_last_strides_3d(ArrayRef<T> sizes) {
       strides[1] = strides[2] * sizes[2];
       return strides;
     default:
-      TORCH_INTERNAL_ASSERT(
-          false, "ChannelsLast3d doesn't support size ", sizes.size());
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast3d doesn't support size ", sizes.size());
   }
 }
 
@@ -127,9 +84,7 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
 template <typename T>
-inline bool is_channels_last_strides_2d_s4(
-    const ArrayRef<T> sizes,
-    const ArrayRef<T> strides) {
+inline bool is_channels_last_strides_2d_s4(const ArrayRef<T> sizes, const ArrayRef<T> strides) {
   T min = 0;
   // special case for trivial C dimension. default to NCHW
   if (strides[1] == 0) {
@@ -169,9 +124,7 @@ inline bool is_channels_last_strides_2d_s4(
 }
 
 template <typename T>
-inline bool is_channels_last_strides_3d_s5(
-    const ArrayRef<T> sizes,
-    const ArrayRef<T> strides) {
+inline bool is_channels_last_strides_3d_s5(const ArrayRef<T> sizes, const ArrayRef<T> strides) {
   T min = 0;
   if (strides[1] == 0) {
     return false;
@@ -245,9 +198,7 @@ inline bool is_channels_last_strides_3d_s5(
 // (is_channels_last_strides_*d_s*) for more details.
 
 template <typename T>
-inline bool is_channels_last_strides_2d(
-    const ArrayRef<T> sizes,
-    const ArrayRef<T> strides) {
+inline bool is_channels_last_strides_2d(const ArrayRef<T> sizes, const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 4:
       return is_channels_last_strides_2d_s4(sizes, strides);
@@ -261,9 +212,7 @@ inline bool is_channels_last_strides_2d(
 }
 
 template <typename T>
-inline bool is_channels_last_strides_3d(
-    const ArrayRef<T> sizes,
-    const ArrayRef<T> strides) {
+inline bool is_channels_last_strides_3d(const ArrayRef<T> sizes, const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 5:
       return is_channels_last_strides_3d_s5(sizes, strides);
@@ -276,15 +225,11 @@ inline bool is_channels_last_strides_3d(
   }
 }
 
-inline bool is_channels_last_strides_2d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+inline bool is_channels_last_strides_2d(const IntArrayRef sizes, const IntArrayRef strides) {
   return is_channels_last_strides_2d<int64_t>(sizes, strides);
 }
 
-inline bool is_channels_last_strides_3d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+inline bool is_channels_last_strides_3d(const IntArrayRef sizes, const IntArrayRef strides) {
   return is_channels_last_strides_3d<int64_t>(sizes, strides);
 }
 
