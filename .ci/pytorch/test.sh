@@ -1298,92 +1298,295 @@ test_custom_script_ops() {
 }
 
 test_libtorch_agnostic_targetting() {
-    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
+    echo "Testing libtorch_agnostic backward compatibility across versions"
+    echo "=============================================================="
 
     REPO_DIR=$(pwd)
     WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
-
-    # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
-    echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agn_2_9_extension
-    time python setup.py bdist_wheel
-
-    # Save the wheel
     mkdir -p "$WHEEL_DIR"
-    cp dist/*.whl "$WHEEL_DIR/"
-    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
-    echo "Built wheel: $(basename "$WHEEL_FILE")"
-    popd
 
-    # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
-    # shellcheck disable=SC1091
-    . venv_pytorch_2_9/bin/activate
+    # Get current PyTorch version
+    CURRENT_VERSION=$(python -c "import torch; v = torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0]; print(v)")
+    CURRENT_MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+    CURRENT_MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+    echo "Current PyTorch version: ${CURRENT_MAJOR}.${CURRENT_MINOR}"
 
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
-    unset PYTHONPATH
+    # Minimum version to test backward compatibility from
+    MIN_MINOR=9
 
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
+    # Discover extensions programmatically from test/cpp_extensions/libtorch_agn_*_extension directories
+    # Format: "extension_dir:target_major:target_minor"
+    EXTENSIONS=()
+    for ext_path in test/cpp_extensions/libtorch_agn_*_extension; do
+        if [[ -d "$ext_path" ]]; then
+            ext_dir=$(basename "$ext_path")
+            # Extract version from directory name: libtorch_agn_2_10_extension -> 2_10
+            version_part=$(echo "$ext_dir" | sed -E 's/libtorch_agn_([0-9]+_[0-9]+)_extension/\1/')
+            target_major=$(echo "$version_part" | cut -d_ -f1)
+            target_minor=$(echo "$version_part" | cut -d_ -f2)
 
-    echo "Installing PyTorch 2.9..."
+            # Only include extensions targeting versions older than current
+            if [[ "$target_major" -lt "$CURRENT_MAJOR" ]] || \
+               [[ "$target_major" -eq "$CURRENT_MAJOR" && "$target_minor" -lt "$CURRENT_MINOR" ]]; then
+                EXTENSIONS+=("${ext_dir}:${target_major}:${target_minor}")
+                echo "  Found extension: ${ext_dir} (target: ${target_major}.${target_minor})"
+            fi
+        fi
+    done
 
-    # Install from release channel only
-    PYTORCH_VERSION="2.9.0"
+    if [[ ${#EXTENSIONS[@]} -eq 0 ]]; then
+        echo "ERROR: No backward-compatible extensions found matching pattern 'libtorch_agn_*_extension'"
+        echo "Expected to find directories like: test/cpp_extensions/libtorch_agn_2_9_extension"
+        echo "This may indicate the extension naming convention has changed."
+        echo ""
+        echo "Available directories in test/cpp_extensions/:"
+        find test/cpp_extensions/ -maxdepth 1 -type d 2>/dev/null | head -20
+        return 1
+    fi
+
+    # Generate runtime versions programmatically: from MIN_MINOR to (CURRENT_MINOR - 1)
+    # These are PyTorch versions that can be installed from the release channel
+    RUNTIME_VERSIONS=()
+    for ((minor = MIN_MINOR; minor < CURRENT_MINOR; minor++)); do
+        RUNTIME_VERSIONS+=("${CURRENT_MAJOR}.${minor}.0")
+    done
+
+    echo "Runtime versions to test: ${RUNTIME_VERSIONS[*]}"
+
+    if [[ ${#RUNTIME_VERSIONS[@]} -eq 0 ]]; then
+        echo "No runtime versions to test (current version is ${CURRENT_MAJOR}.${CURRENT_MINOR})"
+        return 0
+    fi
 
     # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
     if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
         CUDA_MAJOR="${BASH_REMATCH[1]}"
         CUDA_MINOR="${BASH_REMATCH[2]}"
         CUDA_VERSION="cu${CUDA_MAJOR}${CUDA_MINOR}"
-        echo "  Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
+        echo "Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
     else
-        # Default to CPU build
         CUDA_VERSION="cpu"
-        echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
+        echo "No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
     fi
 
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
-        echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
-    else
-        echo "  FAILED to install PyTorch 2.9.0 from release channel"
-        echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
-        deactivate
-        rm -rf venv_pytorch_2_9
-        return 1
-    fi
-
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
-    echo "  Installed version: $INSTALLED_VERSION"
-
-    # Install test dependencies
-    echo "Installing test dependencies..."
-    pip install expecttest numpy unittest-xml-reporting
-
-    # Install the pre-built wheel
+    # Phase 1: Build all extension wheels with current PyTorch
     echo ""
-    echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
-    echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
+    echo "Phase 1: Building extension wheels with current PyTorch"
+    echo "--------------------------------------------------------"
 
-    # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
-    echo ""
-    echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
-    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
+    declare -A WHEEL_FILES
+    for ext_info in "${EXTENSIONS[@]}"; do
+        IFS=':' read -r ext_dir target_major target_minor <<< "$ext_info"
+        ext_path="test/cpp_extensions/${ext_dir}"
+
+        if [[ ! -d "$ext_path" ]]; then
+            echo "WARNING: Extension directory $ext_path not found, skipping..."
+            continue
+        fi
+
         echo ""
-        echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
-    else
-        echo "targeting test failed"
-        deactivate
-        rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+        echo "Building ${ext_dir} (target: ${target_major}.${target_minor})..."
+        pushd "$ext_path" > /dev/null
+
+        # Clean previous builds (including any stale install directories)
+        rm -rf build dist ./*.egg-info install
+
+        if time python setup.py bdist_wheel; then
+            wheel_file=$(find dist -name "*.whl" -type f | head -1)
+            if [[ -n "$wheel_file" ]]; then
+                cp "$wheel_file" "$WHEEL_DIR/"
+                wheel_name=$(basename "$wheel_file")
+                WHEEL_FILES["${target_major}.${target_minor}"]="${WHEEL_DIR}/${wheel_name}"
+                echo "  Built: ${wheel_name}"
+            else
+                echo "  ERROR: No wheel file found after build"
+                popd > /dev/null
+                rm -rf "$WHEEL_DIR"
+                return 1
+            fi
+        else
+            echo "  ERROR: Failed to build ${ext_dir}"
+            popd > /dev/null
+            rm -rf "$WHEEL_DIR"
+            return 1
+        fi
+        popd > /dev/null
+    done
+
+    echo ""
+    echo "Built wheels:"
+    for target_ver in "${!WHEEL_FILES[@]}"; do
+        echo "  Target ${target_ver}: $(basename "${WHEEL_FILES[$target_ver]}")"
+    done
+
+    # Phase 2: Test each extension on compatible runtime versions
+    echo ""
+    echo "Phase 2: Testing backward compatibility"
+    echo "---------------------------------------"
+    echo ""
+    echo "Test matrix (Build: current, Target: X, Runtime: Y where Target <= Y < current):"
+
+    TESTS_PASSED=0
+    TESTS_FAILED=0
+
+    for runtime_version in "${RUNTIME_VERSIONS[@]}"; do
+        # Extract major.minor from runtime version (e.g., "2.9.0" -> "2.9")
+        runtime_major_minor="${runtime_version%.*}"
+        runtime_major="${runtime_major_minor%.*}"
+        runtime_minor="${runtime_major_minor#*.}"
+
+        echo ""
+        echo "=============================================================="
+        echo "Setting up PyTorch ${runtime_version} runtime environment"
+        echo "=============================================================="
+
+        venv_name="venv_pytorch_${runtime_major}_${runtime_minor}"
+
+        # Create a clean venv
+        python -m venv --clear "$venv_name"
+
+        # Use absolute paths for the venv's Python, pip, and uv
+        VENV_PYTHON="${REPO_DIR}/${venv_name}/bin/python"
+        VENV_PIP="${REPO_DIR}/${venv_name}/bin/pip"
+        VENV_UV="${REPO_DIR}/${venv_name}/bin/uv"
+
+        # Clear environment variables that could interfere
+        unset PYTHONPATH
+        unset PYTHONHOME
+
+        # Clear LD_LIBRARY_PATH to avoid conflicts with development PyTorch libraries
+        # The venv's torch will set up its own library paths
+        OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+        unset LD_LIBRARY_PATH
+
+        # Install uv into the venv for fast package installation
+        echo "Installing uv into venv..."
+        "$VENV_PIP" install uv --quiet
+
+        # Install PyTorch runtime using uv (much faster)
+        echo "Installing PyTorch ${runtime_version} using uv..."
+        if ! "$VENV_UV" pip install --python "$VENV_PYTHON" torch=="${runtime_version}" --index-url "https://download.pytorch.org/whl/${CUDA_VERSION}/"; then
+            echo "  ERROR: FAILED to install PyTorch ${runtime_version}"
+            echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
+            echo "  This runtime version is required for backward compatibility testing."
+            rm -rf "$venv_name" "$WHEEL_DIR"
+            return 1
+        fi
+
+        # Verify we got the right version
+        # Use -I (isolated mode) to ignore current directory and PYTHONPATH
+        # Use tail -1 to get only the last line (the version), ignoring any warning messages
+        INSTALLED_VERSION=$("$VENV_PYTHON" -I -c "import torch; print(torch.__version__)" 2>/dev/null | tail -1)
+        echo "  Installed version: $INSTALLED_VERSION"
+
+        # Check if we got an empty version
+        if [[ -z "$INSTALLED_VERSION" ]]; then
+            echo "  ERROR: Failed to get torch version (empty output)"
+            echo "  Debug: Running with stderr visible..."
+            "$VENV_PYTHON" -I -c "import torch; print(torch.__version__)"
+            rm -rf "$venv_name" "$WHEEL_DIR"
+            return 1
+        fi
+
+        if [[ ! "$INSTALLED_VERSION" =~ ^${runtime_major}\.${runtime_minor}\. ]]; then
+            echo "  ERROR: Expected PyTorch ${runtime_major}.${runtime_minor}.x but got ${INSTALLED_VERSION}"
+            echo "  The venv may not be properly isolated from the development PyTorch."
+            rm -rf "$venv_name" "$WHEEL_DIR"
+            return 1
+        fi
+
+        # Install test dependencies using uv
+        echo "Installing test dependencies..."
+        "$VENV_UV" pip install --python "$VENV_PYTHON" expecttest numpy unittest-xml-reporting
+
+        # Install ALL compatible extension wheels into this venv
+        # The test file imports specific extensions by name (libtorch_agn_2_9, libtorch_agn_2_10, etc.)
+        # so we need all of them available for the tests to run
+        INSTALLED_EXTENSIONS=()
+        for target_ver in "${!WHEEL_FILES[@]}"; do
+            target_major="${target_ver%.*}"
+            target_minor="${target_ver#*.}"
+
+            # Check if this extension is compatible with this runtime
+            # Extension is compatible if target_version <= runtime_version
+            if [[ "$target_major" -lt "$runtime_major" ]] || \
+               [[ "$target_major" -eq "$runtime_major" && "$target_minor" -le "$runtime_minor" ]]; then
+
+                wheel_file="${WHEEL_FILES[$target_ver]}"
+                echo "  Installing compatible extension: $(basename "$wheel_file")"
+                "$VENV_UV" pip install --python "$VENV_PYTHON" "$wheel_file"
+                INSTALLED_EXTENSIONS+=("$target_ver")
+            fi
+        done
+
+        if [[ ${#INSTALLED_EXTENSIONS[@]} -eq 0 ]]; then
+            echo "  No compatible extensions for runtime ${runtime_major}.${runtime_minor}, skipping..."
+            rm -rf "$venv_name"
+            if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+                export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
+            fi
+            continue
+        fi
+
+        echo ""
+        echo "  Installed extensions for runtime ${runtime_major}.${runtime_minor}: ${INSTALLED_EXTENSIONS[*]}"
+        echo ""
+
+        # Verify PyTorch version before running tests
+        # Use tail -1 to get only the last line (the version), ignoring any warning messages
+        TEST_RUNTIME_VERSION=$("$VENV_PYTHON" -I -c "import torch; print(torch.__version__)" 2>/dev/null | tail -1)
+        echo "  PyTorch version in test environment: $TEST_RUNTIME_VERSION"
+
+        if [[ ! "$TEST_RUNTIME_VERSION" =~ ^${runtime_major}\.${runtime_minor}\. ]]; then
+            echo "  ERROR: Test environment has wrong PyTorch version!"
+            echo "  Expected: ${runtime_major}.${runtime_minor}.x, Got: $TEST_RUNTIME_VERSION"
+            echo "  ✗ FAILED (wrong runtime)"
+            ((TESTS_FAILED++))
+            rm -rf "$venv_name"
+            if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+                export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
+            fi
+            continue
+        fi
+
+        # Run tests once with all compatible extensions installed
+        # The test file will skip tests for extensions targeting versions newer than runtime
+        echo "  Running tests..."
+        if "$VENV_PYTHON" -I "$REPO_DIR/test/cpp_extensions/test_libtorch_agnostic.py" -v; then
+            echo "  ✓ PASSED (Runtime ${runtime_major}.${runtime_minor} with extensions: ${INSTALLED_EXTENSIONS[*]})"
+            ((TESTS_PASSED++))
+        else
+            echo "  ✗ FAILED (Runtime ${runtime_major}.${runtime_minor})"
+            ((TESTS_FAILED++))
+        fi
+
+        rm -rf "$venv_name"
+
+        # Restore LD_LIBRARY_PATH for next iteration
+        if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+            export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
+        fi
+    done
+
+    # Cleanup
+    rm -rf "$WHEEL_DIR"
+
+    # Summary
+    echo ""
+    echo "=============================================================="
+    echo "Summary"
+    echo "=============================================================="
+    echo "Tests passed: ${TESTS_PASSED}"
+    echo "Tests failed: ${TESTS_FAILED}"
+
+    if [[ "$TESTS_FAILED" -gt 0 ]]; then
+        echo ""
+        echo "ERROR: Some backward compatibility tests failed!"
         return 1
     fi
 
-    deactivate
-    rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+    echo ""
+    echo "All backward compatibility tests passed!"
 
     assert_git_not_dirty
 }
